@@ -1,0 +1,46 @@
+// glslangValidator -V tests/shaders/rot_right.comp -o compiled_shaders/tests/rot_right.spv
+#version 460
+
+// LSB [0 uint] - MSB [1 uint]
+struct u64
+{
+	uint lsb;
+	uint msb;
+};
+
+const uint UINT_MAX = 0xffffffff;
+const uint UINT_BIT = 32;
+
+// right circular shift
+u64 rcs(u64 num, uint r)
+{
+	uint new_msb = num.msb;
+	uint new_lsb = num.lsb;
+
+	new_msb = new_msb >> r;
+	new_lsb = new_lsb >> r;
+
+	uint msb_rem = num.msb & (UINT_MAX >> (UINT_BIT - r));
+	uint lsb_rem = num.lsb & (UINT_MAX >> (UINT_BIT - r));
+
+	new_msb = new_msb | (lsb_rem << (UINT_BIT - r));
+	new_lsb = new_lsb | (msb_rem << (UINT_BIT - r));
+
+	return u64(new_lsb, new_msb);
+}
+
+layout(binding = 0) buffer Input {
+   u64 values[ ];
+};
+
+layout (local_size_x = 8, local_size_y = 1, local_size_z = 1) in;
+
+const uint BUFFER_SIZE = 8;
+
+void main()
+{
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= BUFFER_SIZE) return;
+
+	values[index] = rcs(values[index], 8);
+}

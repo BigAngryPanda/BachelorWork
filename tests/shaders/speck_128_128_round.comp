@@ -1,0 +1,111 @@
+// glslangValidator -V tests/shaders/speck_128_128_round.comp -o compiled_shaders/tests/speck_128_128_round.spv
+#version 460
+
+// MSB [0 uint] - LSB [1 uint]
+struct u64
+{
+	uint lsb;
+	uint msb;
+};
+
+const uint UINT_MAX = 0xffffffff;
+const uint UINT_BIT = 32;
+
+// left circular shift
+u64 lcs(u64 num, uint r)
+{
+	uint new_msb = num.msb;
+	uint new_lsb = num.lsb;
+
+	new_msb = new_msb << r;
+	new_lsb = new_lsb << r;
+
+	uint msb_rem = num.msb & (UINT_MAX << (UINT_BIT - r));
+	uint lsb_rem = num.lsb & (UINT_MAX << (UINT_BIT - r));
+
+	new_msb = new_msb | (lsb_rem >> (UINT_BIT - r));
+	new_lsb = new_lsb | (msb_rem >> (UINT_BIT - r));
+
+	return u64(new_lsb, new_msb);
+}
+
+// right circular shift
+u64 rcs(u64 num, uint r)
+{
+	uint new_msb = num.msb;
+	uint new_lsb = num.lsb;
+
+	new_msb = new_msb >> r;
+	new_lsb = new_lsb >> r;
+
+	uint msb_rem = num.msb & (UINT_MAX >> (UINT_BIT - r));
+	uint lsb_rem = num.lsb & (UINT_MAX >> (UINT_BIT - r));
+
+	new_msb = new_msb | (lsb_rem << (UINT_BIT - r));
+	new_lsb = new_lsb | (msb_rem << (UINT_BIT - r));
+
+	return u64(new_lsb, new_msb);
+}
+
+// biwise xor
+u64 xor(u64 x, u64 y)
+{
+	return u64(x.lsb ^ y.lsb, x.msb ^ y.msb);
+}
+
+u64 add(u64 x, u64 y)
+{
+	uint lsb_sum = x.lsb + y.lsb;
+
+	// We assume we will not face overflow
+	uint msb_sum = x.msb + y.msb + uint(lsb_sum < y.lsb || lsb_sum < x.lsb);
+
+	return u64(lsb_sum, msb_sum);
+}
+
+layout(binding = 0) buffer Input {
+   u64[2] values[ ];
+};
+
+layout (local_size_x = 16, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform pushConstants {
+	uint   buff_size;
+    u64[2] key;
+} metadata;
+
+const uint ROUNDS = 32;
+
+u64 first_half_round(u64 x, u64 y, u64 k)
+{
+	u64 result = rcs(x, 8);
+	result = add(result, y);
+	result = xor(result, k);
+
+	return result;
+}
+
+u64 second_half_round(u64 x, u64 y)
+{
+	u64 result = lcs(y, 3);
+	result = xor(result, x);
+
+	return result;
+}
+
+void main()
+{
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= metadata.buff_size) return;
+
+	u64 ct[2] = {values[index][0], values[index][1]};
+
+	u64 a = metadata.key[0];
+	u64 b = metadata.key[1];
+
+	ct[1] = first_half_round(ct[1], ct[0], a);
+	ct[0] = second_half_round(ct[1], ct[0]);
+
+	values[index][0] = ct[0];
+	values[index][1] = ct[1];
+}
