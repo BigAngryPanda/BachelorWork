@@ -1,45 +1,32 @@
 extern crate libvktypes;
 
 use libvktypes::instance::LibHandler;
-use libvktypes::hardware::{
-	HWDescription,
-	MemoryProperty
-};
-use libvktypes::logical_device::LogicalDevice;
-use libvktypes::memory::{
-	Memory,
-	BufferType
-};
-use libvktypes::pipeline::ComputePipeline;
-use libvktypes::shader::Shader;
-use libvktypes::cmd_queue::{
-	ComputeQueue,
-	AccessType,
-	PipelineStage
-};
-use libvktypes::specialization_constants::SpecializationConstant;
 
-// Special for NVIDIA GeForce GTX 750 Ti
-static DEV_INDEX: usize = 0;
-static QUEUE_FAMILY_INDEX: usize = 0;
-//static DEV_MEMORY_INDEX: usize = 7;
-//static HOST_MEMORY_INDEX: usize = 9;
+const BUFFER_SIZE: usize = 16;
 
-static BUFFER_SIZE: u64 = 32;
+// const PUSH_CONST_SIZE: usize = 20;
 
-const PUSH_CONST_SIZE: usize = 20;
+mod worker;
+
+use worker::{
+	GPUHandler,
+	GPUWorker,
+	CipherType,
+	WorkerType
+};
 
 fn main() {
+/*
 	// Special for NVIDIA GeForce GTX 750 Ti
 	let vk_lib = LibHandler::new(1, 2, 0, true).unwrap();
 
 	let hw_list = HWDescription::list(&vk_lib).unwrap();
-/*
+
 	for (i, hw) in hw_list.iter().enumerate() {
 		print!("\nDevice number {}\n", i);
 		print!("{}", hw);
 	}
-*/
+
 	let dev = LogicalDevice::new(&vk_lib, &hw_list[DEV_INDEX], QUEUE_FAMILY_INDEX).unwrap();
 
 	let host_memory = Memory::new(&dev, BUFFER_SIZE,
@@ -108,4 +95,31 @@ fn main() {
 //	let data: &[u8] = host_memory.read().unwrap();
 
 //	print!("{:?}", data);
+*/
+	// Special for NVIDIA GeForce GTX 750 Ti
+	let vk_lib = LibHandler::new(1, 2, 0, true).unwrap();
+
+	let dev = GPUHandler::new(&vk_lib);
+
+	let create_info = WorkerType {
+		shader_path: "compiled_shaders/speck_128_128.spv",
+		buffer_size: BUFFER_SIZE as u32,
+		cipher_type: CipherType::Speck128_128,
+		key: &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]
+	};
+
+	let worker = GPUWorker::new(&dev, &create_info);
+
+	worker.write_into(
+		&[0x20, 0x6d, 0x61, 0x64, 0x65, 0x20, 0x69, 0x74,
+		0x20, 0x65, 0x71, 0x75, 0x69, 0x76, 0x61, 0x6c]
+	);
+
+	worker.exec();
+
+	let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+
+	worker.copy_into(buffer.as_mut_slice());
+
+	println!("{:02x?}", buffer);
 }
