@@ -4,8 +4,6 @@ use libvktypes::instance::LibHandler;
 
 const BUFFER_SIZE: usize = 16;
 
-// const PUSH_CONST_SIZE: usize = 20;
-
 mod cipher_type;
 mod worker;
 mod key_manager;
@@ -32,17 +30,19 @@ fn main() {
 
 	let dev = GPUHandler::new(&vk_lib);
 
+	let speck_key = Key::<16>::from_file("speck_128_128_test.key");
+
+	#[cfg(debug_assertions)]
+	println!("[Debug] received key speck_128_128_test.key: {:02x?}", speck_key.data());
+
 	let udp_socket = UdpSocket::bind("127.0.0.1:34254").unwrap();
 
 	let mut udp_buffer = [0; BUFFER_SIZE];
 
 	let _ = udp_socket.recv_from(&mut udp_buffer).expect("Failed to read from UDP socket");
 
+	#[cfg(debug_assertions)]
 	println!("[Debug] received data from udp socket: {:02x?}", udp_buffer);
-
-	let speck_key = Key::<16>::from_file("speck_128_128_test.key");
-
-	println!("[Debug] received key speck_128_128_test.key: {:02x?}", speck_key.data());
 
 	let create_info = WorkerType {
 		shader_path: "compiled_shaders/speck_128_128.spv",
@@ -61,6 +61,7 @@ fn main() {
 
 	worker.copy_into(buffer.as_mut_slice());
 
+	#[cfg(debug_assertions)]
 	println!("[Debug] worker result: {:02x?}", buffer);
 
 	let out_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
