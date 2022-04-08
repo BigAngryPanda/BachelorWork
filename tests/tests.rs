@@ -2,7 +2,6 @@
 
 #[cfg(test)]
 mod tests {
-
 	extern crate libvktypes;
 
 	use libvktypes::instance::LibHandler;

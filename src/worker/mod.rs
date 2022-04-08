@@ -27,24 +27,7 @@ use libvktypes::specialization_constants::SpecializationConstant;
 
 use std::mem::size_of;
 
-#[derive(Debug)]
-pub enum CipherType {
-	Speck128_128,
-}
-
-impl CipherType {
-	pub fn key_size(&self) -> u64 {
-		match self {
-			CipherType::Speck128_128 => 16,
-		}
-	}
-
-	pub fn block_size(&self) -> u64 {
-		match self {
-			CipherType::Speck128_128 => 16,
-		}
-	}
-}
+use crate::cipher_type::CipherType;
 
 pub struct WorkerType<'b> {
 	pub shader_path: &'b str,
