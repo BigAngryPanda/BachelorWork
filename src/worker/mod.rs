@@ -129,7 +129,7 @@ impl<'a> GPUWorker<'a> {
 		cmd_queue.cmd_bind_pipeline(&pipeline);
 
 		// TODO
-		cmd_queue.dispatch(create_info.cipher_type.block_size() as u32, 1, 1);
+		cmd_queue.dispatch((dev_memory.size()/create_info.cipher_type.block_size()) as u32, 1, 1);
 
 		cmd_queue.cmd_set_barrier(
 			&dev_memory,
