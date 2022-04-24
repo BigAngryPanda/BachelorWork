@@ -66,5 +66,5 @@ fn main() {
 
 	let out_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
-	udp_socket.send_to(&buffer, out_addr);
+	udp_socket.send_to(&buffer, out_addr).expect("Failed to write to UDP socket");
 }

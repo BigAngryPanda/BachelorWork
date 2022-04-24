@@ -13,6 +13,7 @@ Cargo.lock
 # Added by cargo
 
 /target
+/tests/misc
 
 # Compiled shaders
 *.spv

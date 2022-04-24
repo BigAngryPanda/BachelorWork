@@ -129,7 +129,7 @@ impl<'a> GPUWorker<'a> {
 		cmd_queue.cmd_bind_pipeline(&pipeline);
 
 		// TODO
-		cmd_queue.dispatch((dev_memory.size()/create_info.cipher_type.block_size()) as u32, 1, 1);
+		cmd_queue.dispatch(1, 1, 1);
 
 		cmd_queue.cmd_set_barrier(
 			&dev_memory,
@@ -169,11 +169,11 @@ impl<'a> GPUWorker<'a> {
 	}
 
 	pub fn write_into(&self, buffer: &[u8]) {
-		let f = |bytes: &mut [u8]| {
+		let mut f = |bytes: &mut [u8]| {
 			bytes.clone_from_slice(buffer);
 		};
 
-		self.i_host_memory.write(f).expect("Failed writing to host memory");
+		self.i_host_memory.write(&mut f).expect("Failed writing to host memory");
 	}
 
 	pub fn exec(&self) {
