@@ -1,30 +1,43 @@
 //! All test vectorf form 'SIMON and SPECK Implementation Guide'
 
+extern crate libvktypes;
+
+use libvktypes::instance::LibHandler;
+use libvktypes::hardware::{
+	HWDescription,
+	MemoryProperty
+};
+use libvktypes::logical_device::LogicalDevice;
+use libvktypes::memory::{
+	Memory,
+	BufferType
+};
+use libvktypes::pipeline::ComputePipeline;
+use libvktypes::shader::Shader;
+use libvktypes::cmd_queue::{
+	ComputeQueue,
+	AccessType,
+	PipelineStage
+};
+use libvktypes::specialization_constants::SpecializationConstant;
+
+pub const DEV_INDEX: usize = 0;
+pub const QUEUE_FAMILY_INDEX: usize = 0;
+pub const ATTEMPTS_NUM: usize = 100;
+pub const SLEEP_DURATION: Duration = Duration::from_secs(1);
+pub const SPECK_128_128_SHADER_PATH: &str = "compiled_shaders/speck_128_128.spv";
+pub const DUMMY_SHADER_PATH: &str = "compiled_shaders/tests/dummy.spv";
+
+use std::io::Read;
+use std::fs::File;
+use std::path::Path;
+use std::time::Duration;
+use std::thread;
+use std::io::Write;
+
 #[cfg(test)]
 mod tests {
-	extern crate libvktypes;
-
-	use libvktypes::instance::LibHandler;
-	use libvktypes::hardware::{
-		HWDescription,
-		MemoryProperty
-	};
-	use libvktypes::logical_device::LogicalDevice;
-	use libvktypes::memory::{
-		Memory,
-		BufferType
-	};
-	use libvktypes::pipeline::ComputePipeline;
-	use libvktypes::shader::Shader;
-	use libvktypes::cmd_queue::{
-		ComputeQueue,
-		AccessType,
-		PipelineStage
-	};
-	use libvktypes::specialization_constants::SpecializationConstant;
-
-	pub static DEV_INDEX: usize = 0;
-	pub static QUEUE_FAMILY_INDEX: usize = 0;
+	use crate::*;
 
 	#[test]
 	fn lcs() {
@@ -515,35 +528,9 @@ mod tests {
 // Run this tests separately!
 #[cfg(test)]
 mod performance {
-	extern crate libvktypes;
+	use crate::*;
 
-	use libvktypes::instance::LibHandler;
-	use libvktypes::hardware::{
-		HWDescription,
-		MemoryProperty
-	};
-	use libvktypes::logical_device::LogicalDevice;
-	use libvktypes::memory::{
-		Memory,
-		BufferType
-	};
-	use libvktypes::pipeline::ComputePipeline;
-	use libvktypes::shader::Shader;
-	use libvktypes::cmd_queue::{
-		ComputeQueue,
-		AccessType,
-		PipelineStage
-	};
-	use libvktypes::specialization_constants::SpecializationConstant;
-
-	pub static DEV_INDEX: usize = 0;
-	pub static QUEUE_FAMILY_INDEX: usize = 0;
-
-	use std::io::Read;
-	use std::fs::File;
-	use std::path::Path;
-
-	fn encrypt_data<const BUFFER_SIZE: usize>() {
+	fn encrypt_data<const BUFFER_SIZE: usize>(out_path: &str) {
 		const PUSH_CONST_SIZE: usize = 20;
 
 		let mut pt = File::open(Path::new("tests/misc/plaintext")).expect("Failed to open file");
@@ -612,60 +599,276 @@ mod performance {
 
 		host_memory.write(&mut f).unwrap();
 
-		let now = std::time::Instant::now();
+		let mut file = File::options().append(true).open(out_path).unwrap();
 
-		cmd_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
+		for i in 0..ATTEMPTS_NUM {
+			let now = std::time::Instant::now();
 
-		let elapsed_time = now.elapsed();
+			cmd_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
 
-		println!(
-			"Running cypher with copy took {} sec, {} millisec, {} nanosec.",
-			elapsed_time.as_secs(),
-			elapsed_time.as_millis(),
-			elapsed_time.as_nanos()
-		);
+			writeln!(file, "{}", now.elapsed().as_millis());
+
+			println!("[{}/{}]", i+1, ATTEMPTS_NUM);
+
+			thread::sleep(SLEEP_DURATION);
+		}
+	}
+
+	fn pipeline_test<const BUFFER_SIZE: usize>(out_path: &str) {
+		const PUSH_CONST_SIZE: usize = 20;
+
+		let mut pt = File::open(Path::new("tests/misc/plaintext")).expect("Failed to open file");
+
+		// Special for NVIDIA GeForce GTX 750 Ti
+		let vk_lib = LibHandler::new(1, 2, 0, false).unwrap();
+
+		let hw_list = HWDescription::list(&vk_lib).unwrap();
+
+		let dev = LogicalDevice::new(&vk_lib, &hw_list[DEV_INDEX], QUEUE_FAMILY_INDEX).unwrap();
+
+		let host_memory = Memory::new(&dev, BUFFER_SIZE as u64,
+			MemoryProperty::HOST_VISIBLE,
+			BufferType::STORAGE_BUFFER | BufferType::TRANSFER_SRC | BufferType::TRANSFER_DST
+		).unwrap();
+
+		let dev_memory = Memory::new(&dev, BUFFER_SIZE as u64,
+			MemoryProperty::DEVICE_LOCAL,
+			BufferType::STORAGE_BUFFER | BufferType::TRANSFER_SRC | BufferType::TRANSFER_DST).unwrap();
+
+		let shader = Shader::from_src(&dev, "compiled_shaders/speck_128_128.spv", String::from("main")).unwrap();
+
+		let pipeline = ComputePipeline::new(&dev, &[&dev_memory], &shader, &SpecializationConstant::empty(), PUSH_CONST_SIZE as u32).unwrap();
+
+		let cmd_load_queue = ComputeQueue::new(&dev).unwrap();
+
+		cmd_load_queue.cmd_copy(&host_memory, &dev_memory);
+
+		cmd_load_queue.submit().unwrap();
+
+		let mut f = |bytes: &mut [u8]| {
+			pt.read_exact(bytes).expect("Failed to read data");
+		};
+
+		host_memory.write(&mut f).unwrap();
+
+		cmd_load_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
+
+		let cmd_queue = ComputeQueue::new(&dev).unwrap();
+
+		cmd_queue.cmd_set_barrier(&dev_memory,
+			AccessType::HOST_WRITE,
+			AccessType::SHADER_READ,
+			PipelineStage::HOST,
+			PipelineStage::COMPUTE_SHADER);
+
+		let push_constant: [u8; PUSH_CONST_SIZE] =
+		[
+			0x00, 0x00, 0x00, 0x20,
+			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+		];
+
+		cmd_queue.update_push_constants(&pipeline, &push_constant);
+
+		cmd_queue.cmd_bind_pipeline(&pipeline);
+		cmd_queue.dispatch(1, 1, 1);
+
+		cmd_queue.cmd_set_barrier(&dev_memory,
+			AccessType::SHADER_WRITE,
+			AccessType::TRANSFER_READ,
+			PipelineStage::COMPUTE_SHADER,
+			PipelineStage::TRANSFER);
+
+		cmd_queue.submit().unwrap();
+
+		let mut file = File::options().append(true).open(out_path).unwrap();
+
+		for i in 0..ATTEMPTS_NUM {
+			let now = std::time::Instant::now();
+
+			cmd_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
+
+			writeln!(file, "{}", now.elapsed().as_nanos());
+
+			println!("[{}/{}]", i+1, ATTEMPTS_NUM);
+
+			thread::sleep(SLEEP_DURATION);
+		}
 	}
 
 	#[test]
-	fn data_512mb() {
+	fn full_512mb() {
 		const BUFFER_SIZE: usize = 512*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/512mb.csv");
 	}
 
 	#[test]
-	fn data_1gb() {
+	fn full_1gb() {
 		const BUFFER_SIZE: usize = 1024*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/1gb.csv");
 	}
 
 	#[test]
-	fn data_1_5gb() {
+	fn full_1_5gb() {
 		const BUFFER_SIZE: usize = 1024*1024*1024 + 512*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/1_5gb.csv");
 	}
 
 	#[test]
-	fn data_2gb() {
+	fn full_2gb() {
 		const BUFFER_SIZE: usize = 2*1024*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/2gb.csv");
 	}
 
 	#[test]
-	fn data_2_5gb() {
+	fn full_2_5gb() {
 		const BUFFER_SIZE: usize = 2*1024*1024*1024 + 512*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/2_5gb.csv");
 	}
 
 	#[test]
-	fn data_3gb() {
+	fn full_3gb() {
 		const BUFFER_SIZE: usize = 3*1024*1024*1024;
 
-		encrypt_data::<BUFFER_SIZE>();
+		encrypt_data::<BUFFER_SIZE>("tests/misc/perf_results/full/3gb.csv");
 	}
 
+	#[test]
+	fn pipeline_512mb() {
+		const BUFFER_SIZE: usize = 512*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/512mb.csv");
+	}
+
+	#[test]
+	fn pipeline_1gb() {
+		const BUFFER_SIZE: usize = 1024*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/1gb.csv");
+	}
+
+	#[test]
+	fn pipeline_1_5gb() {
+		const BUFFER_SIZE: usize = 1024*1024*1024 + 512*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/1_5gb.csv");
+	}
+
+	#[test]
+	fn pipeline_2gb() {
+		const BUFFER_SIZE: usize = 2*1024*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/2gb.csv");
+	}
+
+	#[test]
+	fn pipeline_2_5gb() {
+		const BUFFER_SIZE: usize = 2*1024*1024*1024 + 512*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/2_5gb.csv");
+	}
+
+	#[test]
+	fn pipeline_3gb() {
+		const BUFFER_SIZE: usize = 3*1024*1024*1024;
+
+		pipeline_test::<BUFFER_SIZE>("tests/misc/perf_results/pipeline/3gb.csv");
+	}
+}
+
+#[cfg(test)]
+mod fragmentation_perf {
+	use crate::*;
+
+	const DATA_SIZE: usize = 30*1024*1024*1024;
+
+	fn encrypt_data<const BUFFER_SIZE: usize>(out_path: &str) {
+		const PUSH_CONST_SIZE: usize = 20;
+		let blocks_num: usize = DATA_SIZE / BUFFER_SIZE;
+
+		// Special for NVIDIA GeForce GTX 750 Ti
+		let vk_lib = LibHandler::new(1, 2, 0, false).unwrap();
+
+		let hw_list = HWDescription::list(&vk_lib).unwrap();
+
+		let dev = LogicalDevice::new(&vk_lib, &hw_list[DEV_INDEX], QUEUE_FAMILY_INDEX).unwrap();
+
+		let host_memory = Memory::new(&dev, BUFFER_SIZE as u64,
+			MemoryProperty::HOST_VISIBLE,
+			BufferType::STORAGE_BUFFER | BufferType::TRANSFER_SRC | BufferType::TRANSFER_DST
+		).unwrap();
+
+		let dev_memory = Memory::new(&dev, BUFFER_SIZE as u64,
+			MemoryProperty::DEVICE_LOCAL,
+			BufferType::STORAGE_BUFFER | BufferType::TRANSFER_SRC | BufferType::TRANSFER_DST).unwrap();
+
+		let shader = Shader::from_src(&dev, "compiled_shaders/speck_128_128.spv", String::from("main")).unwrap();
+
+		let pipeline = ComputePipeline::new(&dev, &[&dev_memory], &shader, &SpecializationConstant::empty(), PUSH_CONST_SIZE as u32).unwrap();
+
+		let cmd_queue = ComputeQueue::new(&dev).unwrap();
+
+		cmd_queue.cmd_copy(&host_memory, &dev_memory);
+
+		cmd_queue.cmd_set_barrier(&dev_memory,
+			AccessType::HOST_WRITE,
+			AccessType::SHADER_READ,
+			PipelineStage::HOST,
+			PipelineStage::COMPUTE_SHADER);
+
+		let push_constant: [u8; PUSH_CONST_SIZE] =
+		[
+			0x00, 0x00, 0x00, 0x20,
+			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+		];
+
+		cmd_queue.update_push_constants(&pipeline, &push_constant);
+
+		cmd_queue.cmd_bind_pipeline(&pipeline);
+		cmd_queue.dispatch(1, 1, 1);
+
+		cmd_queue.cmd_set_barrier(&dev_memory,
+			AccessType::SHADER_WRITE,
+			AccessType::TRANSFER_READ,
+			PipelineStage::COMPUTE_SHADER,
+			PipelineStage::TRANSFER);
+
+		cmd_queue.cmd_copy(&dev_memory, &host_memory);
+
+		cmd_queue.cmd_set_barrier(&host_memory,
+			AccessType::TRANSFER_WRITE,
+			AccessType::HOST_READ,
+			PipelineStage::TRANSFER,
+			PipelineStage::HOST);
+
+		cmd_queue.submit().unwrap();
+
+		let mut file = File::options().append(true).open(out_path).unwrap();
+
+		for i in 0..ATTEMPTS_NUM {
+			let now = std::time::Instant::now();
+
+			for j in 0..blocks_num {
+				let mut f = |bytes: &mut [u8]| {
+					bytes.fill(j as u8);
+				};
+
+				host_memory.write(&mut f).unwrap();
+
+				cmd_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
+			}
+
+			writeln!(file, "{}", now.elapsed().as_millis());
+
+			println!("[{}/{}]", i+1, ATTEMPTS_NUM);
+
+			thread::sleep(SLEEP_DURATION);
+		}
+	}
 }

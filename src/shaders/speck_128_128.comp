@@ -63,13 +63,15 @@ u64 add(u64 x, u64 y)
 	return u64(lsb_sum, msb_sum);
 }
 
-layout(binding = 0) buffer Input {
+layout(binding = 0) buffer Input
+{
    u64[2] values[ ];
 };
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout(push_constant) uniform pushConstants {
+layout(push_constant) uniform pushConstants
+{
 	uint    buff_size;
     u64[2] key;
 } metadata;

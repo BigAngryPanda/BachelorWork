@@ -176,6 +176,12 @@ impl<'a> GPUWorker<'a> {
 		self.i_host_memory.write(&mut f).expect("Failed writing to host memory");
 	}
 
+	pub fn apply<F>(&self, f: &mut F)
+		where F: FnMut(&mut [u8])
+	{
+		self.i_host_memory.write(f).expect("Failed to process host memory");
+	}
+
 	pub fn exec(&self) {
 		self.i_queue.exec(PipelineStage::TRANSFER, u64::MAX).unwrap();
 	}
