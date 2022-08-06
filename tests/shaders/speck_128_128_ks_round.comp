@@ -1,4 +1,4 @@
-// glslangValidator -V tests/shaders/speck_128_128_ks_round.comp -o compiled_shaders/speck_128_128_ks_round.spv
+// glslangValidator -V tests/shaders/speck_128_128_ks_round.comp -o compiled_shaders/tests/speck_128_128_ks_round.spv
 #version 460
 
 // MSB [0 uint] - LSB [1 uint]
